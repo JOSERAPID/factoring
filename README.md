@@ -1,2 +1,2 @@
-# factoring.
+# factoring
 Plantilla para factoring 
