@@ -147,22 +147,38 @@ async function odHandleRedirect(){
  if(st!==sessionStorage.getItem("od-st")){cl("OneDrive: respuesta inválida, intenta de nuevo","no");return}
  try{await tokenReq({grant_type:"authorization_code",code,redirect_uri:REDIR,code_verifier:sessionStorage.getItem("od-ver")})}catch(e){cl("OneDrive: "+e.message,"no")}
 }
-async function odToken(){
+async function odToken(force){
  let t=OD.tok;if(!t)return null;
- if(t.e>Date.now())return t.a;
+ if(!force&&t.e>Date.now())return t.a;
+ if(!t.r)return null;
  try{t=await tokenReq({grant_type:"refresh_token",refresh_token:t.r});return t.a}catch(e){return null}
 }
+async function odFetch(url,opt){
+ // Intenta con el token actual; si falla (red o token vencido), renueva el token y reintenta una vez.
+ for(let i=0;i<2;i++){
+  const a=await odToken(i>0);if(!a)throw new Error("reconectar");
+  let r;
+  try{r=await fetch(url,{...opt,cache:"no-store",headers:{...(opt.headers||{}),Authorization:"Bearer "+a}})}
+  catch(e){if(i===0){await new Promise(z=>setTimeout(z,1500));continue}
+   throw new Error(navigator.onLine===false?"sin internet":"red")}
+  if(r.status===401&&i===0)continue;
+  if(r.status===401)throw new Error("reconectar");
+  return r;
+ }
+}
 async function odPut(name,data){
- const a=await odToken();if(!a)throw new Error("reconectar");
- const r=await fetch(GR+name+":/content",{method:"PUT",headers:{Authorization:"Bearer "+a,"Content-Type":"application/json"},body:data});
+ const r=await odFetch(GR+name+":/content",{method:"PUT",headers:{"Content-Type":"application/json"},body:data});
  if(!r.ok)throw new Error("Graph "+r.status);
 }
 async function odGet(){
- const a=await odToken();if(!a)throw new Error("reconectar");
- const r=await fetch(GR+"factoring-respaldo.json:/content",{headers:{Authorization:"Bearer "+a}});
+ const r=await odFetch(GR+"factoring-respaldo.json:/content",{});
  if(r.status===404)return null;if(!r.ok)throw new Error("Graph "+r.status);return await r.json();
 }
-const odFail=e=>cl(e.message==="reconectar"?"OneDrive: la sesión venció. Toca OneDrive y luego Conectar.":"OneDrive: no se pudo guardar ("+e.message+"). Tus datos siguen en este equipo.","no");
+const odFail=e=>cl(e.message==="reconectar"?"OneDrive: la sesión venció. Toca OneDrive → Desconectar → Conectar.":
+ e.message==="sin internet"?"OneDrive: sin internet. Se guardará cuando vuelva la conexión. Tus datos siguen en este equipo.":
+ e.message==="red"?"OneDrive: no responde. Toca OneDrive → Desconectar → Conectar y luego Guardar ahora. Tus datos siguen en este equipo.":
+ "OneDrive: no se pudo guardar ("+e.message+"). Tus datos siguen en este equipo.","no");
+window.addEventListener("online",()=>{if(OD.tok)push(true)});
 let odTmr=null;
 function push(force){
  if(!OD.tok)return;
